@@ -1,0 +1,28 @@
+name: Validation CI Extension FreshRSS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-validate:
+    runs-on: native
+    steps:
+      - name: Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: Vérification de la syntaxe PHP
+        run: |
+          for f in $(find . -type f -name "*.php"); do
+            php -l "$f" || exit 1
+          done
+
+      - name: Contrôle de validité des fichiers JSON
+        run: |
+          php -r 'json_decode(file_get_contents("metadata.json")) !== null ?: exit(1);'
+  
+      - name: Run Test Suite
+        run: |
+          php tests/test_suite.php

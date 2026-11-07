@@ -1,0 +1,16 @@
+# Données dynamiques, caches et bases locales
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Fichiers de verrouillage et temporaires
+*.lock
+*.tmp
+
+# Environnement et clés
+.env
+.env.*
+data/batch_translation.lock
+*.lock

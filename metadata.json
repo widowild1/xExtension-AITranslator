@@ -1,0 +1,8 @@
+{
+    "name": "AI Translator",
+    "author": "widowild",
+    "description": "Extension de traduction neuronale et d'assistance IA pour FreshRSS. Supporte LibreTranslate local, Google Gemini, Mistral AI, OpenAI et DeepL avec affichage bilingue et traitement par lots.",
+    "version": "1.2.0",
+    "entrypoint": "AITranslator",
+    "type": "user"
+}
