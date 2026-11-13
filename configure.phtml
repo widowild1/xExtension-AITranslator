@@ -1,0 +1,529 @@
+<?php
+$ext = Minz_ExtensionManager::findExtension('AITranslator')
+    ?: Minz_ExtensionManager::findExtension('AI Translator')
+    ?: Minz_ExtensionManager::findExtension('xExtension-AITranslator');
+
+// Chargement sécurisé des dictionnaires sans violation de visibilité protected
+if ($ext instanceof AITranslatorExtension) {
+    $ext->loadTranslates();
+}
+
+$targetLang   = $ext ? $ext->getUserConfig('target_lang', 'fr') : 'fr';
+$pretranslate = $ext ? (bool)$ext->getUserConfig('pretranslate_enabled', false) : false;
+
+$provider     = $ext ? $ext->getUserConfig('provider', 'gemini') : 'gemini';
+$fallback     = $ext ? $ext->getUserConfig('fallback_provider', 'mistral') : 'mistral';
+$fallback2    = $ext ? $ext->getUserConfig('fallback_provider_2', '') : '';
+$multiplexEnabled = $ext ? (bool)$ext->getUserConfig('multiplex_enabled', false) : false;
+$jitEnabled = $ext ? (bool)$ext->getUserConfig('jit_enabled', false) : false;
+$tldrProvider = $ext ? $ext->getUserConfig('tldr_provider', 'auto') : 'auto';
+$autoTldrMinLen = $ext ? (int)$ext->getUserConfig('auto_tldr_min_length', 2500) : 2500;
+
+// Azure
+$azureKey     = $ext ? $ext->getUserConfig('azure_api_key', '') : '';
+$azureRegion  = $ext ? $ext->getUserConfig('azure_region', 'global') : 'global';
+
+// NLLB-200
+$nllbUrl      = $ext ? $ext->getUserConfig('nllb_api_url', 'http://localhost:8000') : 'http://localhost:8000';
+
+// Gemini / Mistral
+$geminiKey    = $ext ? $ext->getUserConfig('gemini_api_key', '') : '';
+$geminiModel  = $ext ? $ext->getUserConfig('gemini_model', 'gemini-3.5-flash-lite') : 'gemini-3.5-flash-lite';
+
+$mistralKey   = $ext ? $ext->getUserConfig('mistral_api_key', '') : '';
+$mistralModel = $ext ? $ext->getUserConfig('mistral_model', 'mistral-small-latest') : 'mistral-small-latest';
+
+// Ollama / OpenAI
+$ollamaUrl    = $ext ? $ext->getUserConfig('ollama_api_url', 'http://localhost:11434') : 'http://localhost:11434';
+$ollamaModel  = $ext ? $ext->getUserConfig('ollama_model', 'llama3.2:latest') : 'llama3.2:latest';
+$ollamaApiKey = $ext ? $ext->getUserConfig('ollama_api_key', '') : '';
+
+$openaiKey    = $ext ? $ext->getUserConfig('openai_api_key', '') : '';
+$openaiModel  = $ext ? $ext->getUserConfig('openai_model', 'gpt-4o-mini') : 'gpt-4o-mini';
+$openaiUrl    = $ext ? $ext->getUserConfig('openai_api_url', 'https://api.openai.com/v1/chat/completions') : 'https://api.openai.com/v1/chat/completions';
+
+// LibreTranslate / DeepL
+$ltUrl        = $ext ? ($ext->getUserConfig('libretranslate_api_url') ?: $ext->getUserConfig('libretranslate_url', 'http://localhost:5000')) : 'http://localhost:5000';
+$ltKey        = $ext ? $ext->getUserConfig('libretranslate_api_key', '') : '';
+
+$deeplKey     = $ext ? $ext->getUserConfig('deepl_api_key', '') : '';
+$deeplType    = $ext ? $ext->getUserConfig('deepl_api_type', 'free') : 'free';
+
+$stats = $ext ? $ext->getUsageStats() : [];
+$totalOps = ($stats['success_count'] ?? 0) + ($stats['error_count'] ?? 0);
+$successRate = $totalOps > 0 ? round((($stats['success_count'] ?? 0) / $totalOps) * 100, 1) : 100;
+?>
+
+<div class="post">
+    <h2><?php echo _t('ext.aitranslator.title'); ?></h2>
+    <p style="opacity: 0.85;"><?php echo _t('ext.aitranslator.intro'); ?></p>
+
+    <!-- TABLEAU DE BORD D'ACTIVITÉ & QUOTAS -->
+    <div style="margin: 20px 0; padding: 16px; background: rgba(127,127,127,0.06); border: 1px solid rgba(127,127,127,0.2); border-radius: 8px;">
+        <h3 style="margin-top: 0; display: flex; align-items: center; justify-content: space-between;">
+            <span><?php echo _t('ext.aitranslator.dashboard.title'); ?></span>
+            <span style="font-size: 0.75em; font-weight: normal; opacity: 0.7;">
+                <?php echo !empty($stats['last_activity']) ? sprintf(_t('ext.aitranslator.dashboard.last_activity'), date('d/m/Y H:i', $stats['last_activity'])) : _t('ext.aitranslator.dashboard.no_activity'); ?>
+            </span>
+        </h3>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 15px 0;">
+            <div style="padding: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold; color: #2e7d32;"><?php echo (int)($stats['success_count'] ?? 0); ?></div>
+                <div style="font-size: 0.85em; opacity: 0.8;"><?php echo _t('ext.aitranslator.dashboard.stat_success'); ?></div>
+            </div>
+            <div style="padding: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold; color: #0288d1;"><?php echo (int)($stats['tldr_count'] ?? 0); ?></div>
+                <div style="font-size: 0.85em; opacity: 0.8;"><?php echo _t('ext.aitranslator.dashboard.stat_tldr'); ?></div>
+            </div>
+            <div style="padding: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold; color: #f57c00;"><?php echo (int)($stats['cache_count'] ?? 0); ?></div>
+                <div style="font-size: 0.85em; opacity: 0.8;"><?php echo _t('ext.aitranslator.dashboard.stat_cache'); ?></div>
+            </div>
+            <div style="padding: 12px; background: rgba(127,127,127,0.08); border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.8em; font-weight: bold; color: <?php echo ($stats['error_count'] ?? 0) > 0 ? '#c62828' : '#2e7d32'; ?>;">
+                    <?php echo $successRate; ?> %
+                </div>
+                <div style="font-size: 0.85em; opacity: 0.8;"><?php echo sprintf(_t('ext.aitranslator.dashboard.stat_rate'), (int)($stats['error_count'] ?? 0)); ?></div>
+            </div>
+        </div>
+
+        <?php if (!empty($stats['cache_by_provider'])): ?>
+            <div style="margin-top: 15px; font-size: 0.9em;">
+                <strong><?php echo _t('ext.aitranslator.dashboard.cache_distribution'); ?></strong>
+                <div style="display: flex; gap: 15px; flex-wrap: wrap; margin-top: 6px;">
+                    <?php foreach ($stats['cache_by_provider'] as $pName => $pCount): ?>
+                        <span style="padding: 4px 10px; background: rgba(127,127,127,0.12); border-radius: 4px; border: 1px solid rgba(127,127,127,0.2);">
+                            <strong><?php echo htmlspecialchars($pName); ?></strong> : <?php echo (int)$pCount; ?>
+                        </span>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- MAINTENANCE -->
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px dashed rgba(127,127,127,0.25);">
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post" style="display: inline;">
+                    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                    <input type="hidden" name="action_clear_cache" value="1" />
+                    <button type="submit" class="btn btn-sm btn-clear-cache" style="color: #c62828; font-weight: bold;"><?php echo _t('ext.aitranslator.dashboard.btn_clear_cache'); ?></button>
+                </form>
+
+                <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post" style="display: inline;">
+                    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                    <input type="hidden" name="action_clear_logs" value="1" />
+                    <button type="submit" class="btn btn-sm btn-clear-logs"><?php echo _t('ext.aitranslator.dashboard.btn_clear_logs'); ?></button>
+                </form>
+            </div>
+
+            <div style="margin-top: 10px; padding: 10px 14px; background: rgba(198, 40, 40, 0.08); border-left: 3px solid #c62828; border-radius: 4px; font-size: 0.85em; line-height: 1.45;">
+                <strong style="color: #c62828;"><?php echo _t('ext.aitranslator.dashboard.warning_title'); ?></strong>
+                <?php echo _t('ext.aitranslator.dashboard.warning_text'); ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. SECTION IMPORT / EXPORT -->
+    <div style="margin: 25px 0; padding: 18px; background: rgba(127,127,127,0.05); border: 1px solid rgba(127,127,127,0.2); border-radius: 8px;">
+        <h3 style="margin-top: 0;"><?php echo _t('ext.aitranslator.backup.title'); ?></h3>
+        <p style="font-size: 0.9em; opacity: 0.85; margin-bottom: 15px;"><?php echo _t('ext.aitranslator.backup.desc'); ?></p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+            <div style="padding: 14px; background: rgba(127,127,127,0.06); border-radius: 6px;">
+                <h4 style="margin-top: 0;"><?php echo _t('ext.aitranslator.backup.export_section'); ?></h4>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post">
+                        <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                        <input type="hidden" name="action_export_config" value="1" />
+                        <button type="submit" class="btn btn-sm" style="width: 100%; text-align: left;"><?php echo _t('ext.aitranslator.backup.export_config_btn'); ?></button>
+                    </form>
+
+                    <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post">
+                        <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                        <input type="hidden" name="action_export_db" value="1" />
+                        <button type="submit" class="btn btn-sm" style="width: 100%; text-align: left;"><?php echo _t('ext.aitranslator.backup.export_db_btn'); ?></button>
+                    </form>
+                </div>
+            </div>
+
+            <div style="padding: 14px; background: rgba(127,127,127,0.06); border-radius: 6px;">
+                <h4 style="margin-top: 0;"><?php echo _t('ext.aitranslator.backup.import_section'); ?></h4>
+                
+                <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post" enctype="multipart/form-data" style="margin-bottom: 15px;">
+                    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                    <input type="hidden" name="action_import_config" value="1" />
+                    <label style="font-size: 0.85em; font-weight: bold; display: block; margin-bottom: 4px;"><?php echo _t('ext.aitranslator.backup.import_config_lbl'); ?></label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="file" name="config_json_file" accept=".json,application/json" required style="font-size: 0.85em; flex: 1;" />
+                        <button type="submit" class="btn btn-sm"><?php echo _t('ext.aitranslator.backup.import_config_btn'); ?></button>
+                    </div>
+                </form>
+
+                <form action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post" enctype="multipart/form-data">
+                    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+                    <input type="hidden" name="action_import_db" value="1" />
+                    <label style="font-size: 0.85em; font-weight: bold; display: block; margin-bottom: 4px;"><?php echo _t('ext.aitranslator.backup.import_db_lbl'); ?></label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="file" name="db_file" accept=".db,.sqlite,.sqlite3" required style="font-size: 0.85em; flex: 1;" />
+                        <button type="submit" class="btn btn-sm btn-import-db" style="color: #c62828; font-weight: bold;"><?php echo _t('ext.aitranslator.backup.import_db_btn'); ?></button>
+                    </div>
+                    <div style="font-size: 0.8em; opacity: 0.75; margin-top: 4px; color: #c62828;"><?php echo _t('ext.aitranslator.backup.import_db_warn'); ?></div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- FORMULAIRE DE PARAMÈTRES -->
+    <form id="aiTranslatorConfigForm" action="<?php echo _url('extension', 'configure', 'e', urlencode($ext ? $ext->getName() : 'AITranslator')); ?>" method="post">
+        <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+
+        <h3><?php echo _t('ext.aitranslator.general.title'); ?></h3>
+
+        <div class="form-group">
+            <label class="group-name" for="target_lang"><?php echo _t('ext.aitranslator.general.target_lang'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="target_lang" name="target_lang" value="<?php echo htmlspecialchars($targetLang); ?>" class="short" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.general.target_lang_help'); ?></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="pretranslate_enabled"><?php echo _t('ext.aitranslator.general.pretranslate'); ?></label>
+            <div class="group-controls">
+                <label class="checkbox">
+                    <input type="checkbox" id="pretranslate_enabled" name="pretranslate_enabled" value="1" <?php echo $pretranslate ? 'checked="checked"' : ''; ?> />
+                    <?php echo _t('ext.aitranslator.general.pretranslate_desc'); ?>
+                </label>
+            </div>
+        </div>
+
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #ccc; opacity: 0.3;" />
+
+        <!-- 2. ATTRIBUTION DES MOTEURS -->
+        <h3><?php echo _t('ext.aitranslator.engines.title'); ?></h3>
+
+        <div class="form-group">
+            <label class="group-name" for="provider"><?php echo _t('ext.aitranslator.engines.primary_label'); ?></label>
+            <div class="group-controls">
+                <select id="provider" name="provider">
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_self_hosted'); ?>">
+                        <option value="nllb" <?php echo $provider === 'nllb' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_nllb'); ?></option>
+                        <option value="libretranslate" <?php echo $provider === 'libretranslate' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_libretranslate'); ?></option>
+                        <option value="ollama" <?php echo $provider === 'ollama' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_ollama'); ?></option>
+                    </optgroup>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_cloud'); ?>">
+                        <option value="azure" <?php echo $provider === 'azure' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_azure'); ?></option>
+                        <option value="gemini" <?php echo $provider === 'gemini' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_gemini'); ?></option>
+                        <option value="mistral" <?php echo $provider === 'mistral' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_mistral'); ?></option>
+                        <option value="openai" <?php echo $provider === 'openai' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_openai'); ?></option>
+                        <option value="deepl" <?php echo $provider === 'deepl' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_deepl'); ?></option>
+                    </optgroup>
+                </select>
+                <span class="help-text"><?php echo _t('ext.aitranslator.engines.primary_help'); ?></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="fallback_provider"><?php echo _t('ext.aitranslator.engines.fallback_label'); ?></label>
+            <div class="group-controls">
+                <select id="fallback_provider" name="fallback_provider">
+                    <option value="" <?php echo $fallback === '' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_none'); ?></option>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_self_hosted'); ?>">
+                        <option value="nllb" <?php echo $fallback === 'nllb' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_nllb'); ?></option>
+                        <option value="libretranslate" <?php echo $fallback === 'libretranslate' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_libretranslate'); ?></option>
+                        <option value="ollama" <?php echo $fallback === 'ollama' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_ollama'); ?></option>
+                    </optgroup>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_cloud'); ?>">
+                        <option value="azure" <?php echo $fallback === 'azure' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_azure'); ?></option>
+                        <option value="gemini" <?php echo $fallback === 'gemini' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_gemini'); ?></option>
+                        <option value="mistral" <?php echo $fallback === 'mistral' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_mistral'); ?></option>
+                        <option value="openai" <?php echo $fallback === 'openai' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_openai'); ?></option>
+                        <option value="deepl" <?php echo $fallback === 'deepl' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_deepl'); ?></option>
+                    </optgroup>
+                </select>
+                <span class="help-text"><?php echo _t('ext.aitranslator.engines.fallback_help'); ?></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="fallback_provider_2"><?php echo _t('ext.aitranslator.engines.fallback2_label'); ?></label>
+            <div class="group-controls">
+                <select id="fallback_provider_2" name="fallback_provider_2">
+                    <option value="" <?php echo $fallback2 === '' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_none'); ?></option>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_self_hosted'); ?>">
+                        <option value="nllb" <?php echo $fallback2 === 'nllb' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_nllb'); ?></option>
+                        <option value="libretranslate" <?php echo $fallback2 === 'libretranslate' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_libretranslate'); ?></option>
+                        <option value="ollama" <?php echo $fallback2 === 'ollama' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_ollama'); ?></option>
+                    </optgroup>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_cloud'); ?>">
+                        <option value="azure" <?php echo $fallback2 === 'azure' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_azure'); ?></option>
+                        <option value="gemini" <?php echo $fallback2 === 'gemini' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_gemini'); ?></option>
+                        <option value="mistral" <?php echo $fallback2 === 'mistral' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_mistral'); ?></option>
+                        <option value="openai" <?php echo $fallback2 === 'openai' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_openai'); ?></option>
+                        <option value="deepl" <?php echo $fallback2 === 'deepl' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_deepl'); ?></option>
+                    </optgroup>
+                </select>
+                <span class="help-text"><?php echo _t('ext.aitranslator.engines.fallback2_help'); ?></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="multiplex_enabled"><?php echo _t('ext.aitranslator.engines.multiplex_label'); ?></label>
+            <div class="group-controls">
+                <label class="checkbox">
+                    <input type="checkbox" id="multiplex_enabled" name="multiplex_enabled" value="1" <?php echo $multiplexEnabled ? 'checked="checked"' : ''; ?> />
+                    <?php echo _t('ext.aitranslator.engines.multiplex_desc'); ?>
+                </label>
+                <span class="help-text"><?php echo _t('ext.aitranslator.engines.multiplex_help'); ?></span>
+            </div>
+        </div>
+
+                <div class="form-group">
+            <label class="group-name" for="jit_enabled">Traduction à la volée (JIT) :</label>
+            <div class="group-controls">
+                <label class="checkbox">
+                    <input type="checkbox" id="jit_enabled" name="jit_enabled" value="1" <?php echo $jitEnabled ? 'checked="checked"' : ''; ?> />
+                    Traduire et résumer instantanément lors de l'actualisation des flux (via le moteur principal)
+                </label>
+                <span class="help-text">Intercepte les nouveaux articles avant leur insertion en base. Recommandé uniquement avec des moteurs rapides.</span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="tldr_provider"><?php echo _t('ext.aitranslator.engines.tldr_label'); ?></label>
+            <div class="group-controls">
+                <select id="tldr_provider" name="tldr_provider">
+                    <option value="auto" <?php echo $tldrProvider === 'auto' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_auto'); ?></option>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_self_hosted'); ?>">
+                        <option value="ollama" <?php echo $tldrProvider === 'ollama' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_ollama'); ?></option>
+                        <option value="statistical" <?php echo $tldrProvider === 'statistical' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_statistical'); ?></option>
+                    </optgroup>
+                    <optgroup label="<?php echo _t('ext.aitranslator.engines.group_cloud'); ?>">
+                        <option value="gemini" <?php echo $tldrProvider === 'gemini' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_gemini'); ?></option>
+                        <option value="mistral" <?php echo $tldrProvider === 'mistral' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_mistral'); ?></option>
+                        <option value="openai" <?php echo $tldrProvider === 'openai' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.engines.opt_openai'); ?></option>
+                    </optgroup>
+                </select>
+                <span class="help-text"><?php echo _t('ext.aitranslator.engines.tldr_help'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="auto_tldr_min_length">Seuil Auto-TL;DR (caractères)</label>
+            <div class="group-controls">
+                <input type="number" id="auto_tldr_min_length" name="auto_tldr_min_length" min="0" step="100" value="<?php echo (int)$autoTldrMinLen; ?>" style="width: 120px;" />
+                <span class="help-text">Longueur minimale du texte brut (ex. 2500 ≈ 400 mots) pour déclencher automatiquement un résumé TL;DR à l'ingestion et à l'ouverture. Mettre 0 pour désactiver.</span>
+            </div>
+        </div>
+
+
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #ccc; opacity: 0.3;" />
+
+        <!-- 3. IDENTIFIANTS STRUCTURÉS EN DEUX BLOCS -->
+        <h3><?php echo _t('ext.aitranslator.providers.title'); ?></h3>
+
+        <!-- SOUS-SECTION 3.1 : MOTEURS AUTO-HÉBERGÉS -->
+        <div style="margin: 20px 0 15px 0; padding: 10px 14px; background: rgba(2, 136, 209, 0.08); border-left: 4px solid #0288d1; border-radius: 4px;">
+            <h4 style="margin: 0; font-size: 1.1em; color: inherit;">
+                <?php echo _t('ext.aitranslator.providers.subtitle_self_hosted'); ?>
+            </h4>
+        </div>
+
+        <!-- META NLLB-200 -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_nllb'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="nllb_api_url"><?php echo _t('ext.aitranslator.providers.url_nllb'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="nllb_api_url" name="nllb_api_url" value="<?php echo htmlspecialchars($nllbUrl); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_nllb_url'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="nllb"><?php echo _t('ext.aitranslator.providers.btn_test_nllb'); ?></button>
+                <span class="test-status" id="test-status-nllb" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- LIBRETRANSLATE -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_libretranslate'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="libretranslate_api_url"><?php echo _t('ext.aitranslator.providers.url_libretranslate'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="libretranslate_api_url" name="libretranslate_api_url" value="<?php echo htmlspecialchars($ltUrl); ?>" class="text" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="libretranslate_api_key"><?php echo _t('ext.aitranslator.providers.api_key_optional'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="libretranslate_api_key" name="libretranslate_api_key" value="<?php echo htmlspecialchars($ltKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="libretranslate"><?php echo _t('ext.aitranslator.providers.btn_test_lt'); ?></button>
+                <span class="test-status" id="test-status-libretranslate" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- OLLAMA / LLAMA.CPP -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_ollama'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="ollama_api_url"><?php echo _t('ext.aitranslator.providers.url_local'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="ollama_api_url" name="ollama_api_url" value="<?php echo htmlspecialchars($ollamaUrl); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_ollama_url'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="ollama_model"><?php echo _t('ext.aitranslator.providers.model_local'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="ollama_model" name="ollama_model" value="<?php echo htmlspecialchars($ollamaModel); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_ollama_model'); ?></span>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="group-name" for="ollama_api_key">Ollama - Clé API (Optionnelle) :</label>
+            <div class="group-controls">
+                <input type="password" id="ollama_api_key" name="ollama_api_key" value="<?php echo htmlspecialchars($ollamaApiKey, ENT_QUOTES, 'UTF-8'); ?>" autocomplete="new-password" />
+                <span class="help-text">Si votre serveur Ollama / llama.cpp est protégé par un proxy ou nécessite un token Bearer.</span>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="ollama"><?php echo _t('ext.aitranslator.providers.btn_test_ollama'); ?></button>
+                <span class="test-status" id="test-status-ollama" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- SOUS-SECTION 3.2 : SOLUTIONS CLOUD / SAAS -->
+        <div style="margin: 30px 0 15px 0; padding: 10px 14px; background: rgba(46, 125, 50, 0.08); border-left: 4px solid #2e7d32; border-radius: 4px;">
+            <h4 style="margin: 0; font-size: 1.1em; color: inherit;">
+                <?php echo _t('ext.aitranslator.providers.subtitle_cloud'); ?>
+            </h4>
+        </div>
+
+        <!-- MICROSOFT AZURE TRANSLATOR -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_azure'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="azure_api_key"><?php echo _t('ext.aitranslator.providers.api_key'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="azure_api_key" name="azure_api_key" value="<?php echo htmlspecialchars($azureKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="azure_region"><?php echo _t('ext.aitranslator.providers.region'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="azure_region" name="azure_region" value="<?php echo htmlspecialchars($azureRegion); ?>" class="short" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_azure_region'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="azure"><?php echo _t('ext.aitranslator.providers.btn_test_azure'); ?></button>
+                <span class="test-status" id="test-status-azure" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- GOOGLE GEMINI -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_gemini'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="gemini_api_key"><?php echo _t('ext.aitranslator.providers.api_key'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="gemini_api_key" name="gemini_api_key" value="<?php echo htmlspecialchars($geminiKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="gemini_model"><?php echo _t('ext.aitranslator.providers.model'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="gemini_model" name="gemini_model" value="<?php echo htmlspecialchars($geminiModel); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_gemini_model'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="gemini"><?php echo _t('ext.aitranslator.providers.btn_test_gemini'); ?></button>
+                <span class="test-status" id="test-status-gemini" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- MISTRAL AI -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_mistral'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="mistral_api_key"><?php echo _t('ext.aitranslator.providers.api_key'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="mistral_api_key" name="mistral_api_key" value="<?php echo htmlspecialchars($mistralKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="mistral_model"><?php echo _t('ext.aitranslator.providers.model'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="mistral_model" name="mistral_model" value="<?php echo htmlspecialchars($mistralModel); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_mistral_model'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="mistral"><?php echo _t('ext.aitranslator.providers.btn_test_mistral'); ?></button>
+                <span class="test-status" id="test-status-mistral" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- OPENAI -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_openai'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="openai_api_key"><?php echo _t('ext.aitranslator.providers.api_key'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="openai_api_key" name="openai_api_key" value="<?php echo htmlspecialchars($openaiKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="openai_model"><?php echo _t('ext.aitranslator.providers.model'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="openai_model" name="openai_model" value="<?php echo htmlspecialchars($openaiModel); ?>" class="text" />
+                <span class="help-text"><?php echo _t('ext.aitranslator.providers.help_openai_model'); ?></span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="openai_api_url"><?php echo _t('ext.aitranslator.providers.endpoint'); ?></label>
+            <div class="group-controls">
+                <input type="text" id="openai_api_url" name="openai_api_url" value="<?php echo htmlspecialchars($openaiUrl); ?>" class="text" />
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="openai"><?php echo _t('ext.aitranslator.providers.btn_test_openai'); ?></button>
+                <span class="test-status" id="test-status-openai" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <!-- DEEPL -->
+        <h4><?php echo _t('ext.aitranslator.engines.opt_deepl'); ?></h4>
+        <div class="form-group">
+            <label class="group-name" for="deepl_api_key"><?php echo _t('ext.aitranslator.providers.api_key'); ?></label>
+            <div class="group-controls">
+                <input type="password" id="deepl_api_key" name="deepl_api_key" value="<?php echo htmlspecialchars($deeplKey); ?>" class="text" autocomplete="off" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="group-name" for="deepl_api_type"><?php echo _t('ext.aitranslator.providers.account_type'); ?></label>
+            <div class="group-controls">
+                <select id="deepl_api_type" name="deepl_api_type">
+                    <option value="free" <?php echo $deeplType === 'free' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.providers.account_free'); ?></option>
+                    <option value="pro" <?php echo $deeplType === 'pro' ? 'selected="selected"' : ''; ?>><?php echo _t('ext.aitranslator.providers.account_pro'); ?></option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="group-controls">
+                <button type="button" class="btn btn-sm btn-test-provider" data-provider="deepl"><?php echo _t('ext.aitranslator.providers.btn_test_deepl'); ?></button>
+                <span class="test-status" id="test-status-deepl" style="margin-left: 10px; font-weight: bold;"></span>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-important"><?php echo _t('ext.aitranslator.actions.save'); ?></button>
+        </div>
+    </form>
+</div>

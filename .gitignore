@@ -1,0 +1,8 @@
+/data/*
+!/data/.gitkeep
+.env
+.env.*
+*.bak
+*.swp
+.DS_Store
+data/
